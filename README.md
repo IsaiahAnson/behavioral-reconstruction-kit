@@ -1,6 +1,16 @@
 # REA reconstruction kit
 
-This workspace adds repeatable behavior comparisons to the [REA playbook](REA_PLAYBOOK.md). REA identifies evidence in the shipped original; the kit runs the same declared browser case against original and candidate URLs, compares selected observations, and reports missing proof. See [TOOLING_SHORTLIST.md](TOOLING_SHORTLIST.md) for target-specific additions.
+## In simple terms
+
+This kit helps us check whether an app we're building **behaves like the original**.
+
+For example, we can tell it: “Open both apps, click Add, then reload.” It records what each app shows and saves, compares the results, and points to the first difference. It also links each feature to the REA evidence used to understand it and flags missing or outdated evidence.
+
+That matters because a feature can look right in one screenshot but fail after an error, a reload, or a different input. The kit makes those checks repeatable, so we can find and fix differences one feature at a time. It does not clone an app automatically or prove that every behavior matches.
+
+## How it fits with REA
+
+REA helps investigate the shipped original. This kit adds repeatable browser comparisons between the original and the app we're building. It captures selected results, checks evidence references, and reports differences or unknowns. See the [REA playbook](REA_PLAYBOOK.md) for the investigation workflow and [tooling shortlist](TOOLING_SHORTLIST.md) for target-specific additions.
 
 ## Setup
 
