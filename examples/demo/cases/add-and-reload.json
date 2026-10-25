@@ -1,0 +1,34 @@
+{
+  "schema": "reconstruction-case/v1",
+  "id": "add-and-reload",
+  "title": "Add once and reload",
+  "initial_path": "/",
+  "steps": [
+    {
+      "id": "initial",
+      "action": "observe",
+      "observations": [
+        { "name": "count", "kind": "text", "locator": { "kind": "css", "selector": "#count" } },
+        { "name": "url", "kind": "url_path" }
+      ]
+    },
+    {
+      "id": "add",
+      "action": "click",
+      "locator": { "kind": "role", "role": "button", "name": "Add" },
+      "observations": [
+        { "name": "count", "kind": "text", "locator": { "kind": "css", "selector": "#count" } },
+        { "name": "stored-count", "kind": "local_storage", "key": "count" }
+      ]
+    },
+    {
+      "id": "restart-page",
+      "action": "reload",
+      "observations": [
+        { "name": "count", "kind": "text", "locator": { "kind": "css", "selector": "#count" } },
+        { "name": "stored-count", "kind": "local_storage", "key": "count" },
+        { "name": "screen", "kind": "screenshot" }
+      ]
+    }
+  ]
+}
