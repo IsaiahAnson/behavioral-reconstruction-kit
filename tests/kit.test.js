@@ -65,6 +65,44 @@ test('stale target or case metadata cannot produce a pass', async t => {
   assert.match(comparison.reasons.join(' '), /stale/);
 });
 
+test('claim edits preserve captures while source and environment edits invalidate them', async t => {
+  const original = await startDemoServer();
+  const candidate = await startDemoServer();
+  t.after(() => original.server.close());
+  t.after(() => candidate.server.close());
+  const root = await makeProject(t, original.baseUrl, candidate.baseUrl);
+  await capture(root, 'add-and-reload', 'original');
+  await capture(root, 'add-and-reload', 'candidate');
+  const project = await loadProject(root);
+  const runs = await Promise.all(['original', 'candidate'].map(async side => {
+    const run = JSON.parse(await readFile(join(root, 'runs', `add-and-reload.${side}.json`), 'utf8'));
+    delete run.capture_config_sha256;
+    return run;
+  }));
+  assert.equal(compareRuns(project, project.cases.get('add-and-reload'), ...runs).status, 'pass');
+
+  const targetPath = join(root, 'target.json');
+  const target = JSON.parse(await readFile(targetPath, 'utf8'));
+  target.claims[0].title = 'Updated description';
+  target.claims[0].evidence_refs = [{ file: 'evidence/behavior.json', evidence_id: `ev_${'a'.repeat(64)}` }];
+  await writeFile(targetPath, JSON.stringify(target));
+  assert.equal((await compareCase(root, 'add-and-reload', { save: false })).status, 'pass');
+
+  target.original.version = '2.0.0';
+  await writeFile(targetPath, JSON.stringify(target));
+  const sourceChanged = await compareCase(root, 'add-and-reload', { save: false });
+  assert.equal(sourceChanged.status, 'unknown');
+  assert.ok(sourceChanged.reasons.some(reason => reason.includes('original run uses a stale capture configuration')));
+  assert.ok(sourceChanged.reasons.every(reason => !reason.includes('candidate run uses a stale capture configuration')));
+
+  target.original.version = '1.0.0';
+  target.environment.locale = 'fr-FR';
+  await writeFile(targetPath, JSON.stringify(target));
+  const environmentChanged = await compareCase(root, 'add-and-reload', { save: false });
+  assert.equal(environmentChanged.status, 'unknown');
+  assert.equal(environmentChanged.reasons.filter(reason => reason.includes('stale capture configuration')).length, 2);
+});
+
 test('triage converts comparison and REA closure findings into ordered next actions', async t => {
   const root = await makeProject(t, 'http://127.0.0.1:1', 'http://127.0.0.1:2');
   const initial = await triage(root);
@@ -93,6 +131,50 @@ test('duplicate step IDs are rejected before capture', async t => {
   item.steps[1].id = item.steps[0].id;
   await writeFile(path, JSON.stringify(item));
   await assert.rejects(loadProject(root), /Duplicate step ID/);
+});
+
+test('case paths cannot navigate away from the configured app site', async t => {
+  const root = await makeProject(t, 'http://127.0.0.1:1', 'http://127.0.0.1:2');
+  const path = join(root, 'cases', 'add-and-reload.json');
+  const item = JSON.parse(await readFile(path, 'utf8'));
+  item.initial_path = '//outside.example/path';
+  await writeFile(path, JSON.stringify(item));
+  await assert.rejects(loadProject(root), /initial_path: path must stay/);
+  item.initial_path = '/';
+  item.steps[1].action = 'navigate';
+  item.steps[1].path = '/\\outside.example/path';
+  await writeFile(path, JSON.stringify(item));
+  await assert.rejects(loadProject(root), /add: path must stay/);
+});
+
+test('Evidence paths on another Windows drive are rejected', { skip: process.platform !== 'win32' }, async t => {
+  const root = await makeProject(t, 'http://127.0.0.1:1', 'http://127.0.0.1:2');
+  const path = join(root, 'target.json');
+  const target = JSON.parse(await readFile(path, 'utf8'));
+  target.claims[0].evidence_refs = [{ file: 'D:\\outside\\evidence.json', evidence_id: `ev_${'a'.repeat(64)}` }];
+  await writeFile(path, JSON.stringify(target));
+  const result = await report(root);
+  assert.ok(result.claims[0].reasons.some(reason => reason.includes('Path escapes project')));
+});
+
+test('missing or modified screenshot artifacts cannot pass a comparison', async t => {
+  const original = await startDemoServer();
+  const candidate = await startDemoServer();
+  t.after(() => original.server.close());
+  t.after(() => candidate.server.close());
+  const root = await makeProject(t, original.baseUrl, candidate.baseUrl);
+  const originalCapture = await capture(root, 'add-and-reload', 'original');
+  await capture(root, 'add-and-reload', 'candidate');
+  assert.equal((await compareCase(root, 'add-and-reload', { save: false })).status, 'pass');
+  const asset = join(root, originalCapture.result.artifacts['restart-page/screen']);
+  await rm(asset);
+  const missing = await compareCase(root, 'add-and-reload', { save: false });
+  assert.equal(missing.status, 'unknown');
+  assert.match(missing.reasons.join(' '), /screenshot restart-page\/screen artifact cannot be read/);
+  await writeFile(asset, 'modified PNG bytes');
+  const modified = await compareCase(root, 'add-and-reload', { save: false });
+  assert.equal(modified.status, 'unknown');
+  assert.match(modified.reasons.join(' '), /artifact digest differs/);
 });
 
 test('different generated observations cannot be reported as a pass', async t => {

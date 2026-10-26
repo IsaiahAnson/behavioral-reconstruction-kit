@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { mkdir, readFile, readdir, realpath, rename, writeFile } from 'node:fs/promises';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { chromium } from '@playwright/test';
 import { explainSchemaErrors, validateCase, validateTarget } from './schema.js';
 
@@ -16,6 +16,22 @@ export function sha256(value) {
   return createHash('sha256').update(typeof value === 'string' ? value : JSON.stringify(canonical(value))).digest('hex');
 }
 
+export function captureConfigSha256(target, side) {
+  const endpoint = target[side];
+  return sha256({
+    project_id: target.id,
+    side,
+    base_url: endpoint.base_url,
+    version: endpoint.version,
+    artifact_sha256: endpoint.artifact_sha256 ?? null,
+    environment: {
+      viewport: target.environment?.viewport ?? { width: 1280, height: 800 },
+      locale: target.environment?.locale ?? 'en-US',
+      timezone_id: target.environment?.timezone_id ?? 'UTC'
+    }
+  });
+}
+
 async function readJson(path) {
   return JSON.parse(await readFile(path, 'utf8'));
 }
@@ -27,13 +43,28 @@ async function writeJsonAtomic(path, value) {
   await rename(temp, path);
 }
 
-function within(root, child) {
+function isWithin(root, child) {
+  const rel = relative(root, child);
+  return !isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`);
+}
+
+async function within(root, child) {
   const full = resolve(root, child);
-  const rel = relative(resolve(root), full);
-  if (rel === '..' || rel.startsWith(`..${sep}`)) {
-    throw new Error(`Path escapes project: ${child}`);
+  if (!isWithin(resolve(root), full)) throw new Error(`Path escapes project: ${child}`);
+  const [realRoot, realChild] = await Promise.all([realpath(root), realpath(full)]);
+  if (!isWithin(realRoot, realChild)) throw new Error(`Path escapes project: ${child}`);
+  return realChild;
+}
+
+function validateCasePath(target, path, context) {
+  if (path.startsWith('//') || path.startsWith('/\\')) throw new Error(`${context}: path must stay on the configured app site`);
+  for (const side of ['original', 'candidate']) {
+    const base = new URL(target[side].base_url);
+    let resolved;
+    try { resolved = new URL(path, base); }
+    catch { throw new Error(`${context}: invalid ${side} path`); }
+    if (resolved.origin !== base.origin) throw new Error(`${context}: path leaves the ${side} app site`);
   }
-  return full;
 }
 
 export async function loadProject(projectDir) {
@@ -54,10 +85,12 @@ export async function loadProject(projectDir) {
     if (cases.has(item.id)) throw new Error(`Duplicate case: ${item.id}`);
     const stepIds = item.steps.map(step => step.id);
     if (new Set(stepIds).size !== stepIds.length) throw new Error(`Duplicate step ID in ${item.id}`);
+    validateCasePath(target, item.initial_path, `${item.id}/initial_path`);
     for (const step of item.steps) {
       const names = step.observations.map(observation => observation.name);
       if (new Set(names).size !== names.length) throw new Error(`Duplicate observation name in ${item.id}/${step.id}`);
       validateStep(item.id, step);
+      if (step.action === 'navigate') validateCasePath(target, step.path, `${item.id}/${step.id}`);
     }
     cases.set(item.id, item);
   }
@@ -168,6 +201,7 @@ export async function capture(projectDir, caseId, side, options = {}) {
       schema: 'reconstruction-run/v1',
       project_id: project.target.id,
       manifest_sha256: project.manifest_sha256,
+      capture_config_sha256: captureConfigSha256(project.target, side),
       case_id: caseId,
       case_sha256: sha256(testCase),
       side,
@@ -197,7 +231,11 @@ export function compareRuns(project, testCase, original, candidate) {
       problems.push(`${side} run identity is missing or invalid`);
       continue;
     }
-    if (run.manifest_sha256 !== project.manifest_sha256) problems.push(`${side} run uses a stale target manifest`);
+    if (Object.hasOwn(run, 'capture_config_sha256')) {
+      if (run.capture_config_sha256 !== captureConfigSha256(project.target, side)) problems.push(`${side} run uses a stale capture configuration`);
+    } else if (run.manifest_sha256 !== project.manifest_sha256) {
+      problems.push(`${side} run uses a stale target manifest`);
+    }
     if (run.case_sha256 !== expectedDigest) problems.push(`${side} run uses a stale case definition`);
     if (run.target?.version !== project.target[side].version || run.target?.artifact_sha256 !== (project.target[side].artifact_sha256 ?? null)) {
       problems.push(`${side} run uses a different target version or artifact digest`);
@@ -240,7 +278,31 @@ async function compareLoadedCase(project, caseId) {
     readRun(project, caseId, 'original'),
     readRun(project, caseId, 'candidate')
   ]);
-  return compareRuns(project, testCase, original, candidate);
+  const comparison = compareRuns(project, testCase, original, candidate);
+  if (comparison.status === 'unknown') return comparison;
+  const reasons = [];
+  for (const [side, run] of [['original', original], ['candidate', candidate]]) {
+    for (const step of testCase.steps) {
+      for (const observation of step.observations.filter(item => item.kind === 'screenshot')) {
+        const key = `${step.id}/${observation.name}`;
+        const artifact = run.artifacts?.[key];
+        if (typeof artifact !== 'string') {
+          reasons.push(`${side} screenshot ${key} has no artifact path`);
+          continue;
+        }
+        try {
+          const bytes = await readFile(await within(project.root, artifact));
+          const digest = createHash('sha256').update(bytes).digest('hex');
+          if (digest !== run.steps.find(item => item.id === step.id).observations[observation.name]) {
+            reasons.push(`${side} screenshot ${key} artifact digest differs from the run`);
+          }
+        } catch (error) {
+          reasons.push(`${side} screenshot ${key} artifact cannot be read: ${error.message}`);
+        }
+      }
+    }
+  }
+  return reasons.length ? { ...comparison, status: 'unknown', reasons, differences: [] } : comparison;
 }
 
 export async function compareCase(projectDir, caseId, options = {}) {
@@ -252,7 +314,7 @@ export async function compareCase(projectDir, caseId, options = {}) {
 
 async function evidenceIssue(project, ref) {
   let path;
-  try { path = within(project.root, ref.file); }
+  try { path = await within(project.root, ref.file); }
   catch (error) { return error.message; }
   let record;
   try { record = await readJson(path); }
