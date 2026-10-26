@@ -71,9 +71,13 @@ export async function loadProject(projectDir) {
   const root = resolve(projectDir);
   const target = await readJson(join(root, 'target.json'));
   if (!validateTarget(target)) throw new Error(`target.json: ${explainSchemaErrors(validateTarget)}`);
+  const endpoints = {};
   for (const side of ['original', 'candidate']) {
-    try { new URL(target[side].base_url); }
+    try { endpoints[side] = new URL(target[side].base_url); }
     catch { throw new Error(`target.json: ${side}.base_url is invalid`); }
+  }
+  if (endpoints.original.origin === endpoints.candidate.origin) {
+    throw new Error('target.json: original and candidate need different app origins (host or port)');
   }
   const caseDir = join(root, 'cases');
   const files = (await readdir(caseDir)).filter(file => file.endsWith('.json')).sort();
@@ -168,15 +172,21 @@ export async function capture(projectDir, caseId, side, options = {}) {
   if (!testCase) throw new Error(`Unknown case: ${caseId}`);
   const target = project.target[side];
   const baseUrl = new URL(target.base_url);
-  const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({
-    viewport: project.target.environment?.viewport ?? { width: 1280, height: 800 },
-    locale: project.target.environment?.locale ?? 'en-US',
-    timezoneId: project.target.environment?.timezone_id ?? 'UTC'
-  });
+  const browser = await (options.browserType ?? chromium).launch({ headless: true });
+  let context;
+  let tracingStarted = false;
+  let captureError;
   const assetDir = join(project.root, 'runs', 'assets', caseId, side);
-  if (options.trace) await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
   try {
+    context = await browser.newContext({
+      viewport: project.target.environment?.viewport ?? { width: 1280, height: 800 },
+      locale: project.target.environment?.locale ?? 'en-US',
+      timezoneId: project.target.environment?.timezone_id ?? 'UTC'
+    });
+    if (options.trace) {
+      await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
+      tracingStarted = true;
+    }
     const page = await context.newPage();
     await page.goto(new URL(testCase.initial_path, baseUrl).href);
     const steps = [];
@@ -213,13 +223,24 @@ export async function capture(projectDir, caseId, side, options = {}) {
     const output = options.output ?? join(project.root, 'runs', `${caseId}.${side}.json`);
     await writeJsonAtomic(output, result);
     return { output, result };
+  } catch (error) {
+    captureError = error;
+    throw error;
   } finally {
-    if (options.trace) {
-      await mkdir(assetDir, { recursive: true });
-      await context.tracing.stop({ path: join(assetDir, 'trace.zip') });
+    const cleanupErrors = [];
+    if (context && tracingStarted) {
+      try {
+        await mkdir(assetDir, { recursive: true });
+        await context.tracing.stop({ path: join(assetDir, 'trace.zip') });
+      } catch (error) { cleanupErrors.push(error); }
     }
-    await context.close();
-    await browser.close();
+    if (context) {
+      try { await context.close(); }
+      catch (error) { cleanupErrors.push(error); }
+    }
+    try { await browser.close(); }
+    catch (error) { cleanupErrors.push(error); }
+    if (cleanupErrors.length && !captureError) throw new AggregateError(cleanupErrors, 'Failed to close capture browser resources');
   }
 }
 

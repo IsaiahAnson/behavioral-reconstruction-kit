@@ -65,6 +65,45 @@ test('stale target or case metadata cannot produce a pass', async t => {
   assert.match(comparison.reasons.join(' '), /stale/);
 });
 
+test('original and candidate must resolve to different app origins', async t => {
+  const root = await makeProject(t, 'http://127.0.0.1:4179', 'http://127.0.0.1:4179/other-path');
+  await assert.rejects(loadProject(root), /original and candidate need different app origins/);
+  const targetPath = join(root, 'target.json');
+  const target = JSON.parse(await readFile(targetPath, 'utf8'));
+  target.candidate.base_url = 'http://127.0.0.1:4180';
+  await writeFile(targetPath, JSON.stringify(target));
+  assert.equal((await loadProject(root)).target.candidate.base_url, target.candidate.base_url);
+});
+
+test('capture closes the browser when context setup fails', async t => {
+  const root = await makeProject(t, 'http://127.0.0.1:1', 'http://127.0.0.1:2');
+  const closed = [];
+  const browserType = { launch: async () => ({
+    newContext: async () => { throw new Error('context setup failed'); },
+    close: async () => { closed.push('browser'); }
+  }) };
+  await assert.rejects(capture(root, 'add-and-reload', 'original', { browserType }), /context setup failed/);
+  assert.deepEqual(closed, ['browser']);
+});
+
+test('capture keeps the first failure and closes resources after trace cleanup fails', async t => {
+  const root = await makeProject(t, 'http://127.0.0.1:1', 'http://127.0.0.1:2');
+  const closed = [];
+  const browserType = { launch: async () => ({
+    newContext: async () => ({
+      tracing: {
+        start: async () => { closed.push('trace-start'); },
+        stop: async () => { closed.push('trace-stop'); throw new Error('trace stop failed'); }
+      },
+      newPage: async () => { throw new Error('page setup failed'); },
+      close: async () => { closed.push('context'); }
+    }),
+    close: async () => { closed.push('browser'); }
+  }) };
+  await assert.rejects(capture(root, 'add-and-reload', 'original', { trace: true, browserType }), /page setup failed/);
+  assert.deepEqual(closed, ['trace-start', 'trace-stop', 'context', 'browser']);
+});
+
 test('claim edits preserve captures while source and environment edits invalidate them', async t => {
   const original = await startDemoServer();
   const candidate = await startDemoServer();
