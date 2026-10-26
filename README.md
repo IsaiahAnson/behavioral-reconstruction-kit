@@ -1,4 +1,8 @@
+<p align="center"><img src="assets/brk-logo.png" alt="Behavioral Reconstruction Kit logo" width="176"></p>
+
 # Behavioral reconstruction kit
+
+![Two app windows connected by evidence checkpoints](assets/brk-hero.png)
 
 This kit checks whether a browser app you are building behaves like an original app. You describe a short user journey, run it against both apps, and see the first observed difference. [REA](https://github.com/morluto/rea) can investigate the original and save evidence for the behavior you want to reproduce.
 
@@ -33,9 +37,18 @@ npm run kit -- capture ../my-reconstruction add-and-reload original
 npm run kit -- capture ../my-reconstruction add-and-reload candidate
 npm run kit -- compare ../my-reconstruction add-and-reload
 npm run kit -- check ../my-reconstruction
+npm run kit -- triage ../my-reconstruction
 ~~~
 
 Replace **add-and-reload** with your case ID. Captures go in **runs/** and comparisons go in **reports/** inside your project folder. If a page needs time to settle, add a **wait_for** step tied to the result you expect.
+
+**triage** checks every case and claim, then returns a prioritized JSON task list. It identifies the first observed difference, stale or missing captures, and Evidence or owner gaps. An agent can use these tasks to decide what to inspect or rerun next. To let REA authenticate Evidence and evaluate reconstruction closure, provide a [REA coverage workspace](https://github.com/morluto/rea/blob/main/docs/reconstruction-coverage.md):
+
+~~~sh
+npm run kit -- triage ../my-reconstruction --rea-coverage ../my-reconstruction/coverage.json
+~~~
+
+The optional pass runs the pinned `rea-agents@6.7.0` evaluator and adds its status, reasons, recommended probes, and Evidence IDs to the task list. REA's `ready` result means its declared boundary passed the supplied coverage checks; it does not show that unlisted behaviors match. Keep the coverage file with the project and update it as REA collects new Evidence. If REA rejects or cannot authenticate the file, triage exits with an error instead of reporting a pass.
 
 Cases support **observe**, **click**, **fill**, **press**, **reload**, **navigate**, and **wait_for** actions. You can observe text, values, visibility, URL paths, local storage, and screenshots. Locators can use CSS, role, text, label, or test ID. Use **original_locator** and **candidate_locator** when the apps expose the same action through different elements.
 

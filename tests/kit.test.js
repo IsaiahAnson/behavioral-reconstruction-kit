@@ -7,6 +7,7 @@ import test from 'node:test';
 import { promisify } from 'node:util';
 import fc from 'fast-check';
 import { capture, compareCase, compareRuns, loadProject, report, sha256 } from '../src/kit.js';
+import { planTriage, triage } from '../src/triage.js';
 import { startDemoServer } from '../fixtures/demo-app.js';
 
 const source = resolve('examples/demo');
@@ -62,6 +63,27 @@ test('stale target or case metadata cannot produce a pass', async t => {
   const comparison = compareRuns(project, testCase, wrong, { ...wrong, side: 'candidate' });
   assert.equal(comparison.status, 'unknown');
   assert.match(comparison.reasons.join(' '), /stale/);
+});
+
+test('triage converts comparison and REA closure findings into ordered next actions', async t => {
+  const root = await makeProject(t, 'http://127.0.0.1:1', 'http://127.0.0.1:2');
+  const initial = await triage(root);
+  assert.equal(initial.status, 'open');
+  assert.equal(initial.tasks[0].kind, 'refresh-captures');
+  const project = await loadProject(root);
+  const local = await report(root);
+  const rea = {
+    boundary_id: 'demo-boundary', status: 'failed', evidence_ids: [],
+    reasons: [{ code: 'verifier-failed', subject_id: 'count-persists', detail: 'Replay differs' }],
+    recommended_probes: [{ operation: 'capture_browser_scenario', subject_id: 'count-persists', rationale: 'Repeat the click sequence' }]
+  };
+  const result = planTriage(project, local, [['add-and-reload', {
+    status: 'changed', reasons: [], differences: [{ step_id: 'add', observation: 'count', original: '1', candidate: '2' }]
+  }]], rea);
+  assert.equal(result.status, 'changed');
+  assert.equal(result.tasks[0].kind, 'debug-difference');
+  assert.match(result.tasks[0].detail, /add\/count/);
+  assert.ok(result.tasks.some(task => task.kind === 'rea-probe' && task.detail.includes('capture_browser_scenario')));
 });
 
 test('duplicate step IDs are rejected before capture', async t => {
