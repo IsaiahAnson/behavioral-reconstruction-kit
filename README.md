@@ -42,6 +42,8 @@ npm run kit -- triage ../my-reconstruction
 
 Replace **add-and-reload** with your case ID. Captures go in **runs/** and comparisons go in **reports/** inside your project folder. If a page needs time to settle, add a **wait_for** step tied to the result you expect.
 
+You can edit claim descriptions, owners, or Evidence links without capturing the browsers again. Capture again after changing an app URL, version, artifact digest, browser setting, or case steps. Runs made before this rule was added still use the older freshness check until you recapture them.
+
 **triage** checks every case and claim, then returns a prioritized JSON task list. It identifies the first observed difference, stale or missing captures, and Evidence or owner gaps. An agent can use these tasks to decide what to inspect or rerun next. To let REA authenticate Evidence and evaluate reconstruction closure, provide a [REA coverage workspace](https://github.com/morluto/rea/blob/main/docs/reconstruction-coverage.md):
 
 ~~~sh
@@ -56,7 +58,7 @@ Cases support **observe**, **click**, **fill**, **press**, **reload**, **navigat
 | --- | --- |
 | **pass** | The selected observations matched in the two captures. |
 | **changed** | A selected observation differed; the report points to the first differing step. |
-| **unknown** | A capture is missing, incomplete, or stale after a case or target change. Capture again. |
+| **unknown** | A capture is missing, incomplete, or stale, or a screenshot artifact is missing or changed. Capture again. |
 | **open** | A required claim still lacks evidence, an owner, or a passing case. |
 | **checks-passed** | The declared required claims passed this kit's checks. This is not proof of full app equivalence. |
 
