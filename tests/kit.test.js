@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
-import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
@@ -34,7 +35,8 @@ function startBatchServer() {
       return;
     }
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-    response.end('<!doctype html><html><body><span id="count">0</span><button id="add">Add</button><script>document.querySelector("#add").addEventListener("click", () => { const count = document.querySelector("#count"); count.textContent = String(Number(count.textContent) + 1); localStorage.setItem("count", count.textContent); });</script></body></html>');
+    const count = failAtFailurePath && request.url === '/before-fail' ? '9' : '0';
+    response.end(`<!doctype html><html><body><span id="count">${count}</span><button id="add">Add</button><script>document.querySelector("#add").addEventListener("click", () => { const count = document.querySelector("#count"); count.textContent = String(Number(count.textContent) + 1); localStorage.setItem("count", count.textContent); });</script></body></html>`);
   });
   return new Promise((resolvePromise, reject) => {
     server.once('error', reject);
@@ -273,14 +275,16 @@ test('the public CLI captures and compares a real browser case', async t => {
   t.after(() => original.server.close());
   t.after(() => candidate.server.close());
   const root = await makeProject(t, original.baseUrl, candidate.baseUrl);
+  const captured = {};
   for (const side of ['original', 'candidate']) {
     const args = ['src/cli.js', 'capture', root, 'add-and-reload', side];
     if (side === 'original') args.push('--trace');
     const { stdout } = await execFileAsync(process.execPath, args, { cwd: resolve('.') });
-    assert.equal(JSON.parse(stdout).result.side, side);
+    captured[side] = JSON.parse(stdout).result;
+    assert.equal(captured[side].side, side);
   }
-  assert.ok((await stat(join(root, 'runs', 'assets', 'add-and-reload', 'original', 'trace.zip'))).size > 0);
-  assert.ok((await stat(join(root, 'runs', 'assets', 'add-and-reload', 'candidate', 'restart-page-screen.png'))).size > 0);
+  assert.ok((await stat(join(root, captured.original.trace_path))).size > 0);
+  assert.ok((await stat(join(root, captured.candidate.artifacts['restart-page/screen']))).size > 0);
   const { stdout } = await execFileAsync(process.execPath, ['src/cli.js', 'compare', root, 'add-and-reload'], { cwd: resolve('.') });
   assert.equal(JSON.parse(stdout).status, 'pass');
 });
@@ -302,8 +306,9 @@ test('run-all captures and compares every case and writes traces when requested'
   for (const caseId of ['add-and-reload', 'second-case']) {
     assert.equal(summary.cases.find(item => item.case_id === caseId).comparison.status, 'pass');
     for (const side of ['original', 'candidate']) {
-      assert.ok((await stat(join(root, 'runs', `${caseId}.${side}.json`))).size > 0);
-      assert.ok((await stat(join(root, 'runs', 'assets', caseId, side, 'trace.zip'))).size > 0);
+      const run = JSON.parse(await readFile(join(root, 'runs', `${caseId}.${side}.json`), 'utf8'));
+      assert.ok(run.capture_id);
+      assert.ok((await stat(join(root, run.trace_path))).size > 0);
     }
     assert.equal(JSON.parse(await readFile(join(root, 'reports', `${caseId}.json`), 'utf8')).status, 'pass');
   }
@@ -317,13 +322,20 @@ test('run-all continues after a failed capture and never passes from old runs', 
   const root = await makeProject(t, original.baseUrl, candidate.baseUrl);
   const failingCase = JSON.parse(await readFile(join(root, 'cases', 'add-and-reload.json'), 'utf8'));
   failingCase.id = 'failed-capture';
-  failingCase.initial_path = '/fail';
+  failingCase.initial_path = '/before-fail';
+  failingCase.steps = [
+    { id: 'screen-first', action: 'observe', observations: [{ name: 'screen', kind: 'screenshot' }] },
+    { id: 'visit-fail', action: 'navigate', path: '/fail', observations: [{ name: 'url', kind: 'url_path' }] }
+  ];
   await writeFile(join(root, 'cases', 'failed-capture.json'), JSON.stringify(failingCase));
-  const laterCase = { ...failingCase, id: 'later-case', initial_path: '/' };
+  const laterCase = JSON.parse(await readFile(join(root, 'cases', 'add-and-reload.json'), 'utf8'));
+  laterCase.id = 'later-case';
   await writeFile(join(root, 'cases', 'later-case.json'), JSON.stringify(laterCase));
 
   for (const side of ['original', 'candidate']) await capture(root, 'failed-capture', side);
   assert.equal((await compareCase(root, 'failed-capture')).status, 'pass');
+  const priorRun = JSON.parse(await readFile(join(root, 'runs', 'failed-capture.original.json'), 'utf8'));
+  const priorScreenshot = await readFile(join(root, priorRun.artifacts['screen-first/screen']));
   original.failAtFailurePath();
 
   let stdout;
@@ -343,6 +355,12 @@ test('run-all continues after a failed capture and never passes from old runs', 
   assert.equal(JSON.parse(await readFile(join(root, 'reports', 'failed-capture.json'), 'utf8')).status, 'unknown');
   const savedRun = JSON.parse(await readFile(join(root, 'runs', 'failed-capture.original.json'), 'utf8'));
   assert.equal(savedRun.schema, 'reconstruction-run-failure/v1');
+  const archivedName = (await readdir(join(root, 'runs', 'history'))).find(name => name.startsWith('failed-capture.original.'));
+  assert.ok(archivedName);
+  const archivedRun = JSON.parse(await readFile(join(root, 'runs', 'history', archivedName), 'utf8'));
+  const archivedScreenshot = await readFile(join(root, archivedRun.artifacts['screen-first/screen']));
+  assert.deepEqual(archivedScreenshot, priorScreenshot);
+  assert.equal(createHash('sha256').update(archivedScreenshot).digest('hex'), archivedRun.steps[0].observations.screen);
   const laterCheck = await compareCase(root, 'failed-capture', { save: false });
   assert.equal(laterCheck.status, 'unknown');
   assert.match(laterCheck.reasons.join(' '), /original capture failed/);

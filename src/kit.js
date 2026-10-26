@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, readdir, realpath, rename, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { chromium } from '@playwright/test';
@@ -176,7 +176,8 @@ export async function capture(projectDir, caseId, side, options = {}) {
   let context;
   let tracingStarted = false;
   let captureError;
-  const assetDir = join(project.root, 'runs', 'assets', caseId, side);
+  const captureId = randomUUID();
+  const assetDir = join(project.root, 'runs', 'assets', caseId, side, captureId);
   try {
     context = await browser.newContext({
       viewport: project.target.environment?.viewport ?? { width: 1280, height: 800 },
@@ -209,6 +210,7 @@ export async function capture(projectDir, caseId, side, options = {}) {
     }
     const result = {
       schema: 'reconstruction-run/v1',
+      capture_id: captureId,
       project_id: project.target.id,
       manifest_sha256: project.manifest_sha256,
       capture_config_sha256: captureConfigSha256(project.target, side),
@@ -217,6 +219,7 @@ export async function capture(projectDir, caseId, side, options = {}) {
       side,
       target: { name: target.name, version: target.version, artifact_sha256: target.artifact_sha256 ?? null },
       captured_at: new Date().toISOString(),
+      trace_path: options.trace ? relative(project.root, join(assetDir, 'trace.zip')).replaceAll('\\', '/') : null,
       artifacts,
       steps
     };
