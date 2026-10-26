@@ -4,9 +4,9 @@
 
 ![Two app windows connected by evidence checkpoints](assets/brk-hero.png)
 
-This kit checks whether a browser app you are building behaves like an original app. You describe a short user journey, run it against both apps, and see the first observed difference. [REA](https://github.com/morluto/rea) can investigate the original and save evidence for the behavior you want to reproduce.
+This kit's built-in runner compares **browser-accessible** apps. You provide URLs for the original and the app you are building, describe a short user journey, and see the first observed difference. [REA](https://github.com/morluto/rea) investigates the original and saves Evidence about its behavior; it does not build or convert either app into a browser app.
 
-The kit does not build a clone for you or prove that every behavior matches.
+The kit checks only the observations you declare. It does not prove that every behavior matches.
 
 ## Quick start
 
