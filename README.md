@@ -4,9 +4,9 @@
 
 ![Two app windows connected by evidence checkpoints](assets/brk-hero.png)
 
-This kit's built-in runner compares **browser-accessible** apps. You provide URLs for the original and the app you are building, describe a short user journey, and see the first observed difference. [REA](https://github.com/morluto/rea) investigates the original and saves Evidence about its behavior; it does not build or convert either app into a browser app.
+[REA](https://github.com/morluto/rea) studies the original app and saves evidence about what it does. It does not build a new app.
 
-The kit checks only the observations you declare. It does not prove that every behavior matches.
+BRK checks the app you are building against the original. It runs the same steps in both apps and shows where their results differ. BRK's current checks run in a browser, so both apps need a web address. A passing check covers only the steps you choose.
 
 ## Quick start
 
