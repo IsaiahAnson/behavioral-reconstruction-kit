@@ -62,7 +62,9 @@ If your agent does not show REA tools after setup, restart it and use the diagno
 ]
 ~~~
 
-5. Capture the same behavior in the original and candidate, then run **compare** and **check** as shown in the [main README](README.md#compare-your-own-apps).
+5. Capture the same behavior in the original and candidate, then run **compare**, **check**, and **triage** as shown in the [main README](README.md#compare-your-own-apps). Triage lists the next capture, Evidence, or debugging action for each open case and claim.
+
+For REA's authenticated coverage check, prepare a [coverage workspace](https://github.com/morluto/rea/blob/main/docs/reconstruction-coverage.md) for the same feature boundary and run `npm run kit -- triage ../my-reconstruction --rea-coverage ../my-reconstruction/coverage.json`. The workspace needs REA Evidence bundle records, declared surfaces and claims, owners, verifier results, and a selected boundary. BRK does not generate those declarations from browser cases; ask your REA-enabled agent to build and update them from the investigation. The resulting REA status and recommended probes appear beside BRK's local findings.
 
 If **check** stays **open**, read its reasons. Missing Evidence, a mismatched ID or artifact digest, or a case without a passing comparison must be resolved separately. A saved code trace alone does not prove that the user-visible behavior occurred.
 
