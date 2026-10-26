@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 import { capture, compareCase, report } from './kit.js';
 import { triage } from './triage.js';
+import { runAll } from './batch.js';
 
 const [command, project, caseId, side, ...flags] = process.argv.slice(2);
 
 async function main() {
   if (!command || !project) {
-    throw new Error('Usage: npm run kit -- <check|triage|capture|compare> <project-dir> [case-id] [original|candidate]');
+    throw new Error('Usage: npm run kit -- <check|triage|capture|compare|run-all> <project-dir> [case-id] [original|candidate] [--trace]');
   }
   let result;
   switch (command) {
@@ -25,6 +26,12 @@ async function main() {
       if (!caseId) throw new Error('compare needs a case ID');
       result = await compareCase(project, caseId);
       break;
+    case 'run-all': {
+      const args = [caseId, side, ...flags].filter(arg => arg !== undefined);
+      if (args.some(arg => arg !== '--trace')) throw new Error('run-all accepts only the --trace option');
+      result = await runAll(project, { trace: args.includes('--trace') });
+      break;
+    }
     default: throw new Error(`Unknown command: ${command}`);
   }
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
