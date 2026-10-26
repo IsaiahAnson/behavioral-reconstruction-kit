@@ -28,7 +28,7 @@ REA is separate from the browser comparison kit. Follow [Set up REA with this ki
 
 1. Copy [examples/demo](examples/demo) to a new folder for your project, such as **../my-reconstruction**. Keep your captures and reports in that folder.
 2. Start the original and the app you are building. Both must be reachable in a browser.
-3. Edit the new folder's **target.json**. Set **original.base_url** and **candidate.base_url** to those two addresses. Give each app the version you are testing. Record the original artifact's SHA-256 if you have a shipped file.
+3. Edit the new folder's **target.json**. Set **original.base_url** and **candidate.base_url** to those two addresses. Use different hosts or ports so BRK cannot compare an app with itself. Give each app the version you are testing. Record the original artifact's SHA-256 if you have a shipped file.
 4. Edit **cases/add-and-reload.json** to describe one real behavior. Change the actions, locators, and observations to match your apps. Keep each step ID unique.
 5. Capture each side, compare them, and check the project's claims:
 
