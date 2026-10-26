@@ -36,11 +36,14 @@ REA is separate from the browser comparison kit. Follow [Set up REA with this ki
 npm run kit -- capture ../my-reconstruction add-and-reload original
 npm run kit -- capture ../my-reconstruction add-and-reload candidate
 npm run kit -- compare ../my-reconstruction add-and-reload
+npm run kit -- run-all ../my-reconstruction
 npm run kit -- check ../my-reconstruction
 npm run kit -- triage ../my-reconstruction
 ~~~
 
-Replace **add-and-reload** with your case ID. Captures go in **runs/** and comparisons go in **reports/** inside your project folder. If a page needs time to settle, add a **wait_for** step tied to the result you expect.
+For **capture** and **compare**, replace **add-and-reload** with your case ID. Captures go in **runs/** and comparisons go in **reports/** inside your project folder. If a page needs time to settle, add a **wait_for** step tied to the result you expect.
+
+Use **run-all** to capture both apps and compare every case in the project. It prints a JSON summary with each case's capture and comparison status; `--trace` saves Playwright traces for each capture. The command exits 0 when all cases pass, 2 when at least one case changed and none are unknown, or 3 when any case is unknown. A failed capture marks that case unknown rather than comparing older run files, and does not prevent later cases from running.
 
 You can edit claim descriptions, owners, or Evidence links without capturing the browsers again. Capture again after changing an app URL, version, artifact digest, browser setting, or case steps. Runs made before this rule was added still use the older freshness check until you recapture them.
 

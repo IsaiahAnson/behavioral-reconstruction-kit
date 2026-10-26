@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
+import { createServer } from 'node:http';
 import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -23,6 +24,26 @@ async function makeProject(t, originalUrl, candidateUrl) {
   await writeFile(join(root, 'target.json'), JSON.stringify(target));
   await writeFile(join(root, 'cases', 'add-and-reload.json'), await readFile(join(source, 'cases', 'add-and-reload.json')));
   return root;
+}
+
+function startBatchServer() {
+  let failAtFailurePath = false;
+  const server = createServer((request, response) => {
+    if (failAtFailurePath && request.url === '/fail') {
+      response.destroy();
+      return;
+    }
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    response.end('<!doctype html><html><body><span id="count">0</span><button id="add">Add</button><script>document.querySelector("#add").addEventListener("click", () => { const count = document.querySelector("#count"); count.textContent = String(Number(count.textContent) + 1); localStorage.setItem("count", count.textContent); });</script></body></html>');
+  });
+  return new Promise((resolvePromise, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => resolvePromise({
+      server,
+      baseUrl: `http://127.0.0.1:${server.address().port}`,
+      failAtFailurePath() { failAtFailurePath = true; }
+    }));
+  });
 }
 
 test('identical behavior passes, while a missing Evidence reference leaves the claim open', async t => {
@@ -262,4 +283,67 @@ test('the public CLI captures and compares a real browser case', async t => {
   assert.ok((await stat(join(root, 'runs', 'assets', 'add-and-reload', 'candidate', 'restart-page-screen.png'))).size > 0);
   const { stdout } = await execFileAsync(process.execPath, ['src/cli.js', 'compare', root, 'add-and-reload'], { cwd: resolve('.') });
   assert.equal(JSON.parse(stdout).status, 'pass');
+});
+
+test('run-all captures and compares every case and writes traces when requested', async t => {
+  const original = await startDemoServer();
+  const candidate = await startDemoServer();
+  t.after(() => original.server.close());
+  t.after(() => candidate.server.close());
+  const root = await makeProject(t, original.baseUrl, candidate.baseUrl);
+  const secondCase = JSON.parse(await readFile(join(root, 'cases', 'add-and-reload.json'), 'utf8'));
+  secondCase.id = 'second-case';
+  await writeFile(join(root, 'cases', 'second-case.json'), JSON.stringify(secondCase));
+
+  const { stdout } = await execFileAsync(process.execPath, ['src/cli.js', 'run-all', root, '--trace'], { cwd: resolve('.') });
+  const summary = JSON.parse(stdout);
+  assert.equal(summary.status, 'pass');
+  assert.equal(summary.totals.pass, 2);
+  for (const caseId of ['add-and-reload', 'second-case']) {
+    assert.equal(summary.cases.find(item => item.case_id === caseId).comparison.status, 'pass');
+    for (const side of ['original', 'candidate']) {
+      assert.ok((await stat(join(root, 'runs', `${caseId}.${side}.json`))).size > 0);
+      assert.ok((await stat(join(root, 'runs', 'assets', caseId, side, 'trace.zip'))).size > 0);
+    }
+    assert.equal(JSON.parse(await readFile(join(root, 'reports', `${caseId}.json`), 'utf8')).status, 'pass');
+  }
+});
+
+test('run-all continues after a failed capture and never passes from old runs', async t => {
+  const original = await startBatchServer();
+  const candidate = await startBatchServer();
+  t.after(() => original.server.close());
+  t.after(() => candidate.server.close());
+  const root = await makeProject(t, original.baseUrl, candidate.baseUrl);
+  const failingCase = JSON.parse(await readFile(join(root, 'cases', 'add-and-reload.json'), 'utf8'));
+  failingCase.id = 'failed-capture';
+  failingCase.initial_path = '/fail';
+  await writeFile(join(root, 'cases', 'failed-capture.json'), JSON.stringify(failingCase));
+  const laterCase = { ...failingCase, id: 'later-case', initial_path: '/' };
+  await writeFile(join(root, 'cases', 'later-case.json'), JSON.stringify(laterCase));
+
+  for (const side of ['original', 'candidate']) await capture(root, 'failed-capture', side);
+  assert.equal((await compareCase(root, 'failed-capture')).status, 'pass');
+  original.failAtFailurePath();
+
+  let stdout;
+  let exitCode;
+  try {
+    ({ stdout } = await execFileAsync(process.execPath, ['src/cli.js', 'run-all', root], { cwd: resolve('.') }));
+    exitCode = 0;
+  } catch (error) {
+    stdout = error.stdout;
+    exitCode = error.code;
+  }
+  const summary = JSON.parse(stdout);
+  assert.equal(exitCode, 3);
+  assert.equal(summary.status, 'unknown');
+  assert.equal(summary.cases.find(item => item.case_id === 'failed-capture').captures.original.status, 'failed');
+  assert.equal(summary.cases.find(item => item.case_id === 'failed-capture').comparison.status, 'unknown');
+  assert.equal(JSON.parse(await readFile(join(root, 'reports', 'failed-capture.json'), 'utf8')).status, 'unknown');
+  assert.equal(summary.cases.find(item => item.case_id === 'later-case').comparison.status, 'pass');
+  for (const side of ['original', 'candidate']) {
+    assert.ok((await stat(join(root, 'runs', `later-case.${side}.json`))).size > 0);
+  }
+  assert.equal(JSON.parse(await readFile(join(root, 'reports', 'later-case.json'), 'utf8')).status, 'pass');
 });
