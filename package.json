@@ -10,6 +10,8 @@
     "kit": "node src/cli.js",
     "check": "node src/cli.js check examples/demo",
     "check:rea-mcp": "node scripts/check-rea-mcp.js",
+    "setup:browser": "node node_modules/playwright/cli.js install chromium",
+    "demo": "node scripts/demo.js",
     "test": "node --test"
   },
   "dependencies": {

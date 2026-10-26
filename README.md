@@ -1,70 +1,63 @@
-# REA reconstruction kit
+# Behavioral reconstruction kit
 
-## In simple terms
+This kit checks whether a browser app you are building behaves like an original app. You describe a short user journey, run it against both apps, and see the first observed difference. [REA](https://github.com/morluto/rea) can investigate the original and save evidence for the behavior you want to reproduce.
 
-This kit helps us check whether an app we're building **behaves like the original**.
+The kit does not build a clone for you or prove that every behavior matches.
 
-For example, we can tell it: “Open both apps, click Add, then reload.” It records what each app shows and saves, compares the results, and points to the first difference. It also links each feature to the REA evidence used to understand it and flags missing or outdated evidence.
+## Quick start
 
-That matters because a feature can look right in one screenshot but fail after an error, a reload, or a different input. The kit makes those checks repeatable, so we can find and fix differences one feature at a time. It does not clone an app automatically or prove that every behavior matches.
+Install Git, [Node.js](https://nodejs.org/) 22.19 or newer, and npm. With access to this private repository, run:
 
-## How it fits with REA
-
-REA helps investigate the shipped original. This kit adds repeatable browser comparisons between the original and the app we're building. It captures selected results, checks evidence references, and reports differences or unknowns. See the [REA playbook](REA_PLAYBOOK.md) for the investigation workflow and [tooling shortlist](TOOLING_SHORTLIST.md) for target-specific additions.
-
-## Setup
-
-This repository installs `@playwright/test`, `fast-check`, and `ajv` through `package-lock.json`. Install the project dependencies and Chromium in a fresh clone:
-
-```powershell
+~~~sh
+git clone https://github.com/IsaiahAnson/behavioral-reconstruction-kit.git
+cd behavioral-reconstruction-kit
 npm ci
-node .\node_modules\playwright\cli.js install chromium
-npm test
-```
+npm run setup:browser
+npm run demo
+~~~
 
-REA is pinned to `rea-agents@6.7.0` in the MCP check script. It can be run through `npx`; connect it to a coding agent using REA's scoped setup workflow and restart that agent. The companion [`behavioral-reconstruction` skill](skills/behavioral-reconstruction/SKILL.md) lives in this repository and can be copied into a Codex skills directory. The curated [Playwright CLI skill](https://github.com/openai/skills/blob/main/skills/.curated/playwright/SKILL.md) is a useful optional companion for browser exploration.
+The browser setup installs Chromium for Playwright. The demo starts two local counter apps, runs the same click-and-reload case against each, and reports a passing comparison. You do not need to start servers yourself. If the demo also reports **open**, that is expected: its claim has no REA Evidence reference.
 
-On the development machine, Codex's REA registration, both skills, and Chromium were installed. A standalone MCP handshake returned 207 tools. Native REA providers were left to a target-specific setup.
+REA is separate from the browser comparison kit. Follow [Set up REA with this kit](REA_SETUP.md) when you are ready to investigate a real original app.
 
-## Use the kit
+## Compare your own apps
 
-Copy `examples/demo` to a new project directory and edit `target.json` and `cases/*.json`. The original and candidate must be reachable at their declared `base_url` values. Record versions, a shared browser environment, feature claims, and the original artifact SHA-256 when one is available.
+1. Copy [examples/demo](examples/demo) to a new folder for your project, such as **../my-reconstruction**. Keep your captures and reports in that folder.
+2. Start the original and the app you are building. Both must be reachable in a browser.
+3. Edit the new folder's **target.json**. Set **original.base_url** and **candidate.base_url** to those two addresses. Give each app the version you are testing. Record the original artifact's SHA-256 if you have a shipped file.
+4. Edit **cases/add-and-reload.json** to describe one real behavior. Change the actions, locators, and observations to match your apps. Keep each step ID unique.
+5. Capture each side, compare them, and check the project's claims:
 
-```powershell
-npm run kit -- capture path/to/project case-id original
-npm run kit -- capture path/to/project case-id candidate
-npm run kit -- compare path/to/project case-id
-npm run kit -- check path/to/project
-```
+~~~sh
+npm run kit -- capture ../my-reconstruction add-and-reload original
+npm run kit -- capture ../my-reconstruction add-and-reload candidate
+npm run kit -- compare ../my-reconstruction add-and-reload
+npm run kit -- check ../my-reconstruction
+~~~
 
-`capture` saves full JSON under `runs/`. `compare` saves a report under `reports/` and returns `pass`, `changed`, or `unknown`. `check` aggregates required claims and returns `checks-passed`, `changed`, or `open`. The direct `node src/cli.js` entry point uses exit codes 0 for a pass or all checks passed, 2 for a difference, 3 for unknown/open, and 1 for invalid input or a runtime failure. The npm wrapper can return 1 for a nonzero child exit on Windows; use the JSON status or the direct entry point in automation. Captures are tied to hashes of the case and target manifest; changing either makes the older run unknown until recaptured.
+Replace **add-and-reload** with your case ID. Captures go in **runs/** and comparisons go in **reports/** inside your project folder. If a page needs time to settle, add a **wait_for** step tied to the result you expect.
 
-Add `--trace` after the side in a `capture` command to save a Playwright trace. A case may request a `screenshot` observation; the PNG is saved under `runs/assets/` and its SHA-256 is compared exactly. Screenshot equality is byte equality, so use a separate Playwright visual assertion with an appropriate threshold when harmless pixel variation is expected.
+Cases support **observe**, **click**, **fill**, **press**, **reload**, **navigate**, and **wait_for** actions. You can observe text, values, visibility, URL paths, local storage, and screenshots. Locators can use CSS, role, text, label, or test ID. Use **original_locator** and **candidate_locator** when the apps expose the same action through different elements.
 
-The demo intentionally reports `open`: it has no REA Evidence reference, and its URLs require running demo servers. To exercise the browser runner without an external app:
+| Result | Meaning |
+| --- | --- |
+| **pass** | The selected observations matched in the two captures. |
+| **changed** | A selected observation differed; the report points to the first differing step. |
+| **unknown** | A capture is missing, incomplete, or stale after a case or target change. Capture again. |
+| **open** | A required claim still lacks evidence, an owner, or a passing case. |
+| **checks-passed** | The declared required claims passed this kit's checks. This is not proof of full app equivalence. |
 
-```powershell
-node --test
-```
+Once REA has produced Evidence for the original, save its full JSON record inside your project and add its file and Evidence ID to the matching claim in **target.json**. The [REA setup guide](REA_SETUP.md) shows the steps. The kit checks those references and an optional original artifact digest; it does not authenticate REA Evidence. For formal closure, use [REA's obligation ledger](https://github.com/morluto/rea/blob/main/docs/reconstruction-obligation-ledgers.md).
 
-Those tests start local servers, compare matching behavior, introduce a deliberate divergence, and check that stale metadata and missing proof do not pass.
+## Useful commands and limits
 
-Check the pinned REA server command independently of a Codex session with `npm run check:rea-mcp`. It sends MCP `initialize` and `tools/list` over stdio and reports the live tool count.
+~~~sh
+npm test                 # Run local browser and comparison tests
+npm run check:rea-mcp    # Check the pinned REA server's MCP handshake
+~~~
 
-## Case format
+Add **--trace** after **original** or **candidate** in a capture command to save a Playwright trace. Cases can observe text, values, visibility, URL paths, local storage, or screenshots. Screenshot comparison uses exact PNG bytes; use a visual assertion tool if small pixel differences should be tolerated. The kit compares only observations you list and does not normalize their values automatically.
 
-Each case has an `initial_path` and steps with unique IDs. Actions are `observe`, `click`, `fill`, `press`, `reload`, `navigate`, and `wait_for`. Observations are `text`, `value`, `visible`, `url_path`, `local_storage`, and `screenshot`. A locator may use CSS, role, text, label, or test ID. Supply `original_locator` and `candidate_locator` when the two apps expose the same behavior through different elements. Each step stores its selected observations in the run record.
+For automation, call **node src/cli.js** directly: exit code 0 means pass, 2 means changed, 3 means unknown or open, and 1 means invalid input or a runtime error. On Windows, **npm run kit -- ...** may return npm's exit code 1 for any nonzero child result, so read the JSON status as well.
 
-Only selected observations are compared. The runner does not infer that an unobserved side effect is absent. It compares URL paths rather than hosts, so original and candidate may run on different origins. It makes no implicit normalization of text or storage values. Add explicit case design for asynchronous settlement with `wait_for`.
-
-The kit checks that an Evidence reference points to a file whose `evidence_id` matches and, when configured, that its original artifact digest matches. **It does not authenticate REA Evidence cryptographically or prove app equivalence.** Use REA's [obligation ledger](https://github.com/morluto/rea/blob/main/docs/reconstruction-obligation-ledgers.md) for formal Evidence validation and closure. The `checks-passed` status means this kit's declared structural and case checks passed within the selected scope.
-
-## Windows path note
-
-If a Windows workspace path contains `&`, Playwright's generated `npx` command shim may fail. The direct browser installation command used here was:
-
-```powershell
-node .\node_modules\playwright\cli.js install chromium
-```
-
-`npm run kit -- ...` and `node --test` work from this path.
+See the [REA playbook](REA_PLAYBOOK.md) for the investigation workflow and the [tooling shortlist](TOOLING_SHORTLIST.md) for optional tools needed by particular targets.
