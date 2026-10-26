@@ -248,6 +248,10 @@ export function compareRuns(project, testCase, original, candidate) {
   const expectedDigest = sha256(testCase);
   const problems = [];
   for (const [side, run] of [['original', original], ['candidate', candidate]]) {
+    if (run?.schema === 'reconstruction-run-failure/v1' && run.project_id === project.target.id && run.case_id === testCase.id && run.side === side) {
+      problems.push(`${side} capture failed: ${run.error}`);
+      continue;
+    }
     if (!run || run.schema !== 'reconstruction-run/v1' || run.project_id !== project.target.id || run.side !== side || run.case_id !== testCase.id) {
       problems.push(`${side} run identity is missing or invalid`);
       continue;

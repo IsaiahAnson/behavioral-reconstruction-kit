@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { mkdir, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { capture, compareCase, loadProject } from './kit.js';
@@ -13,6 +14,25 @@ function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+async function markFailedCapture(project, caseId, side, message) {
+  const runPath = join(project.root, 'runs', `${caseId}.${side}.json`);
+  const historyDir = join(project.root, 'runs', 'history');
+  await mkdir(historyDir, { recursive: true });
+  try {
+    await rename(runPath, join(historyDir, `${caseId}.${side}.${randomUUID()}.json`));
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  await writeJsonAtomic(runPath, {
+    schema: 'reconstruction-run-failure/v1',
+    project_id: project.target.id,
+    case_id: caseId,
+    side,
+    failed_at: new Date().toISOString(),
+    error: message
+  });
+}
+
 export async function runAll(projectDir, options = {}) {
   const project = await loadProject(projectDir);
   const cases = [];
@@ -26,6 +46,7 @@ export async function runAll(projectDir, options = {}) {
         captures[side] = { status: 'captured' };
       } catch (error) {
         const message = errorMessage(error);
+        await markFailedCapture(project, caseId, side, message);
         captures[side] = { status: 'failed', error: message };
         captureErrors.push(`${side} capture failed: ${message}`);
       }
@@ -72,6 +93,7 @@ export async function runAll(projectDir, options = {}) {
 
   const totals = { pass: 0, changed: 0, unknown: 0 };
   for (const item of cases) totals[item.comparison.status]++;
-  const status = totals.unknown ? 'unknown' : totals.changed ? 'changed' : 'pass';
-  return { schema: 'reconstruction-batch/v1', status, totals, cases };
+  const status = cases.length === 0 || totals.unknown ? 'unknown' : totals.changed ? 'changed' : 'pass';
+  return { schema: 'reconstruction-batch/v1', project_id: project.target.id, status, totals, cases,
+    reasons: cases.length === 0 ? ['No case files were found'] : [] };
 }

@@ -341,9 +341,36 @@ test('run-all continues after a failed capture and never passes from old runs', 
   assert.equal(summary.cases.find(item => item.case_id === 'failed-capture').captures.original.status, 'failed');
   assert.equal(summary.cases.find(item => item.case_id === 'failed-capture').comparison.status, 'unknown');
   assert.equal(JSON.parse(await readFile(join(root, 'reports', 'failed-capture.json'), 'utf8')).status, 'unknown');
+  const savedRun = JSON.parse(await readFile(join(root, 'runs', 'failed-capture.original.json'), 'utf8'));
+  assert.equal(savedRun.schema, 'reconstruction-run-failure/v1');
+  const laterCheck = await compareCase(root, 'failed-capture', { save: false });
+  assert.equal(laterCheck.status, 'unknown');
+  assert.match(laterCheck.reasons.join(' '), /original capture failed/);
   assert.equal(summary.cases.find(item => item.case_id === 'later-case').comparison.status, 'pass');
   for (const side of ['original', 'candidate']) {
     assert.ok((await stat(join(root, 'runs', `later-case.${side}.json`))).size > 0);
   }
   assert.equal(JSON.parse(await readFile(join(root, 'reports', 'later-case.json'), 'utf8')).status, 'pass');
+});
+
+test('run-all does not report pass for a project with no cases', async t => {
+  const root = await makeProject(t, 'http://127.0.0.1:1', 'http://127.0.0.1:2');
+  await rm(join(root, 'cases', 'add-and-reload.json'));
+  const targetPath = join(root, 'target.json');
+  const target = JSON.parse(await readFile(targetPath, 'utf8'));
+  target.claims = [];
+  await writeFile(targetPath, JSON.stringify(target));
+  let stdout;
+  let exitCode;
+  try {
+    ({ stdout } = await execFileAsync(process.execPath, ['src/cli.js', 'run-all', root], { cwd: resolve('.') }));
+    exitCode = 0;
+  } catch (error) {
+    stdout = error.stdout;
+    exitCode = error.code;
+  }
+  const result = JSON.parse(stdout);
+  assert.equal(exitCode, 3);
+  assert.equal(result.status, 'unknown');
+  assert.match(result.reasons.join(' '), /No case files/);
 });

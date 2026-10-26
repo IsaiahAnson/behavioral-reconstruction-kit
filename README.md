@@ -30,20 +30,23 @@ REA is separate from the browser comparison kit. Follow [Set up REA with this ki
 2. Start the original and the app you are building. Both must be reachable in a browser.
 3. Edit the new folder's **target.json**. Set **original.base_url** and **candidate.base_url** to those two addresses. Use different hosts or ports so BRK cannot compare an app with itself. Give each app the version you are testing. Record the original artifact's SHA-256 if you have a shipped file.
 4. Edit **cases/add-and-reload.json** to describe one real behavior. Change the actions, locators, and observations to match your apps. Keep each step ID unique.
-5. Capture each side, compare them, and check the project's claims:
+5. Run every case, then check the project's claims:
 
 ~~~sh
-npm run kit -- capture ../my-reconstruction add-and-reload original
-npm run kit -- capture ../my-reconstruction add-and-reload candidate
-npm run kit -- compare ../my-reconstruction add-and-reload
 npm run kit -- run-all ../my-reconstruction
 npm run kit -- check ../my-reconstruction
 npm run kit -- triage ../my-reconstruction
 ~~~
 
-For **capture** and **compare**, replace **add-and-reload** with your case ID. Captures go in **runs/** and comparisons go in **reports/** inside your project folder. If a page needs time to settle, add a **wait_for** step tied to the result you expect.
+**run-all** captures both apps and compares every case. It prints each case's result as JSON. Captures go in **runs/** and comparisons go in **reports/** inside your project folder. If one capture fails, BRK continues with the other cases, marks the failed case unknown, and saves its earlier run in **runs/history/**. Add **--trace** to save Playwright traces. If a page needs time to settle, add a **wait_for** step tied to the result you expect.
 
-Use **run-all** to capture both apps and compare every case in the project. It prints a JSON summary with each case's capture and comparison status; `--trace` saves Playwright traces for each capture. The command exits 0 when all cases pass, 2 when at least one case changed and none are unknown, or 3 when any case is unknown. A failed capture marks that case unknown rather than comparing older run files, and does not prevent later cases from running.
+To rerun just one case, replace **add-and-reload** with your case ID:
+
+~~~sh
+npm run kit -- capture ../my-reconstruction add-and-reload original
+npm run kit -- capture ../my-reconstruction add-and-reload candidate
+npm run kit -- compare ../my-reconstruction add-and-reload
+~~~
 
 You can edit claim descriptions, owners, or Evidence links without capturing the browsers again. Capture again after changing an app URL, version, artifact digest, browser setting, or case steps. Runs made before this rule was added still use the older freshness check until you recapture them.
 
